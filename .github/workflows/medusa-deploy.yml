@@ -1,114 +1,121 @@
-name: Medusa Backend Deploy (clone source repo, build in-run, deploy via Terraform)
+name: Medusa Backend Deploy (Terraform -> build -> ACR -> App Service)
 
-on:
-  push:
-    branches:
-      - main
+# on:
+#   push:
+#     branches: [ main ]
+  workflow_dispatch:
 
 env:
   TF_WORKING_DIR: .
+  IMAGE_NAME: medusa-backend
 
 jobs:
-  deploy:
+  terraform:
     runs-on: ubuntu-latest
+    outputs:
+      backend_url: ${{ steps.capture.outputs.backend_url }}
+      acr_name: ${{ steps.capture.outputs.acr_name }}
+      acr_login_server: ${{ steps.capture.outputs.acr_login_server }}
+      app_service_name: ${{ steps.capture.outputs.app_service_name }}
+      resource_group_name: ${{ steps.capture.outputs.resource_group_name }}
+      db_host: ${{ steps.capture.outputs.db_host }}
+      db_port: ${{ steps.capture.outputs.db_port }}
+      db_name: ${{ steps.capture.outputs.db_name }}
+      db_user: ${{ steps.capture.outputs.db_user }}
+      db_password: ${{ steps.capture.outputs.db_password }}
 
     steps:
-      # 1) Checkout pipeline repo
       - name: Checkout pipeline repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2) Checkout Medusa source repo
-      - name: Checkout Medusa source repository (smarter-EMR/ecomm-terraform)
+      - name: Checkout Medusa source repo (smarter-EMR/ecomm-terraform)
         uses: actions/checkout@v4
         with:
           repository: smarter-EMR/ecomm-terraform
-          token: ${{ secrets.GH_PAT }}
           path: ecomm-terraform
+          token: ${{ secrets.GH_PAT }}
           fetch-depth: 0
 
-      # 3) Validate JSON exists
-      - name: Validate medusa-deploy-config.json exists
+      - name: Ensure medusa-deploy-config.json exists
         run: |
           if [ ! -f medusa-deploy-config.json ]; then
-            echo "medusa-deploy-config.json missing."
+            echo "medusa-deploy-config.json missing in pipeline repo root. Exiting."
             exit 1
           fi
+          echo "Found medusa-deploy-config.json:"
           cat medusa-deploy-config.json
 
-      # 4) Create Dockerfile
-      - name: Create Dockerfile in source path
+      - name: Create Dockerfile inside source repo (runner-only)
         run: |
-          SRC_PATH="ecomm-terraform/my-medusa-store"
-          mkdir -p "$SRC_PATH"
-          cat > "${SRC_PATH}/Dockerfile" <<'EOF'
+          SRC="ecomm-terraform/my-medusa-store"
+          mkdir -p "$SRC"
+          cat > "${SRC}/Dockerfile" <<'EOF'
           FROM node:20-alpine AS builder
           WORKDIR /app
           COPY package.json yarn.lock* package-lock.json* ./
-          RUN npm install --force
+          RUN npm ci --production=false
           COPY . .
           RUN npm run build || true
 
-          FROM node:20-alpine AS runtime
+          FROM node:20-alpine
           WORKDIR /app
           ENV NODE_ENV=production
           COPY --from=builder /app .
           EXPOSE 9000
-          CMD ["npm", "start"]
+          CMD ["yarn", "start"]
           EOF
+          echo "Dockerfile created in runner at ${SRC}/Dockerfile"
 
-      # 5) Parse medusa JSON
-      - name: Parse medusa config
+      - name: Parse medusa-deploy-config.json into env
         run: |
           echo "IMAGE_REPO=$(jq -r '.image_repo_name' medusa-deploy-config.json)" >> $GITHUB_ENV
           echo "IMAGE_TAG=$(jq -r '.image_tag' medusa-deploy-config.json)" >> $GITHUB_ENV
           echo "ACR_NAME=$(jq -r '.acr_name' medusa-deploy-config.json)" >> $GITHUB_ENV
-          echo "RG=$(jq -r '.resource_group' medusa-deploy-config.json)" >> $GITHUB_ENV
+          echo "RESOURCE_GROUP=$(jq -r '.resource_group' medusa-deploy-config.json)" >> $GITHUB_ENV
+          echo "APP_SERVICE_NAME=$(jq -r '.app_service_name' medusa-deploy-config.json)" >> $GITHUB_ENV
+          # expose other useful values
+          echo "ADMIN_EMAIL=$(jq -r '.admin_email' medusa-deploy-config.json)" >> $GITHUB_ENV
+          echo "ADMIN_PASSWORD=$(jq -r '.admin_password' medusa-deploy-config.json)" >> $GITHUB_ENV
 
-      # 6) Login to Azure
       - name: Azure Login
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # 7) Install Terraform
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: 1.9.5
 
-      # 8) COPY tfvars BEFORE ANY TERRAFORM APPLY
-      - name: Prepare terraform.tfvars.json
+      - name: Copy medusa-deploy-config.json -> terraform.tfvars.json
         run: |
-          cp medusa-deploy-config.json ${TF_WORKING_DIR}/terraform.tfvars.json
-          echo "Copied config into terraform.tfvars.json"
+          cp medusa-deploy-config.json terraform.tfvars.json
+          echo "Copied medusa-deploy-config.json -> terraform.tfvars.json"
 
-      # 9) Terraform init + ACR module apply
-      - name: Terraform init & apply (ACR)
-        working-directory: ${{ env.TF_WORKING_DIR }}
+      - name: Terraform init & apply (create ACR)
         run: |
           terraform init -input=false
           terraform apply -auto-approve -target=module.acr
 
-      # 10) Build & push Docker image
-      - name: Build and push Docker image
+      - name: Build & push Medusa Docker image to ACR
+        env:
+          IMAGE_REPO: ${{ env.IMAGE_REPO }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          ACR_NAME: ${{ env.ACR_NAME }}
         run: |
-          SRC_PATH="ecomm-terraform/my-medusa-store"
-
+          SRC="ecomm-terraform/my-medusa-store"
           LOGIN_SERVER=$(az acr show -n "${ACR_NAME}" --query loginServer -o tsv)
           IMAGE="${LOGIN_SERVER}/${IMAGE_REPO}:${IMAGE_TAG}"
-
-          docker build -t "${IMAGE}" "${SRC_PATH}"
+          echo "Building ${IMAGE} from ${SRC}"
+          docker build -t "${IMAGE}" "${SRC}" --file "${SRC}/Dockerfile"
           az acr login --name "${ACR_NAME}"
           docker push "${IMAGE}"
-
           echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
           echo "LOGIN_SERVER=${LOGIN_SERVER}" >> $GITHUB_ENV
 
-      # 11) Full Terraform apply
       - name: Terraform apply (final)
-        working-directory: ${{ env.TF_WORKING_DIR }}
         env:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -116,17 +123,117 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
           terraform init -input=false
-          terraform apply -auto-approve
+          terraform apply -auto-approve -var-file="terraform.tfvars.json"
 
-      # 12) Terraform outputs
-      - name: Terraform outputs
-        working-directory: ${{ env.TF_WORKING_DIR }}
+      - name: Capture Terraform outputs
+        id: capture
         run: |
-          terraform output -json > tf_outputs.json
-          cat tf_outputs.json
+          echo "acr_name=$(terraform output -raw acr_name)" >> $GITHUB_OUTPUT
+          echo "acr_login_server=$(terraform output -raw acr_login_server)" >> $GITHUB_OUTPUT
+          echo "app_service_name=$(terraform output -raw app_service_name)" >> $GITHUB_OUTPUT
+          echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
+          echo "db_host=$(terraform output -raw db_host)" >> $GITHUB_OUTPUT
+          if terraform output -json db_port >/dev/null 2>&1; then
+            echo "db_port=$(terraform output -raw db_port)" >> $GITHUB_OUTPUT
+          else
+            echo "db_port=5432" >> $GITHUB_OUTPUT
+          fi
+          echo "db_name=$(terraform output -raw db_name)" >> $GITHUB_OUTPUT
+          echo "db_user=$(terraform output -raw db_user)" >> $GITHUB_OUTPUT
+          echo "db_password=$(terraform output -raw db_password)" >> $GITHUB_OUTPUT
+          if terraform output -json backend_url >/dev/null 2>&1; then
+            echo "backend_url=$(terraform output -raw backend_url)" >> $GITHUB_OUTPUT
+          else
+            APP=$(terraform output -raw app_service_name)
+            echo "backend_url=${APP}.azurewebsites.net" >> $GITHUB_OUTPUT
+          fi
 
-      # 13) Delete ACR after deployment
-      - name: Delete ACR
-        if: always()
+  deploy:
+    needs: terraform
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout pipeline repo
+        uses: actions/checkout@v4
+
+      - name: Checkout Medusa source repo (to run seeds locally)
+        uses: actions/checkout@v4
+        with:
+          repository: smarter-EMR/ecomm-terraform
+          path: ecomm-terraform
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: ACR Login
         run: |
-          az acr delete -n "${ACR_NAME}" --yes || true
+          az acr login --name "${{ needs.terraform.outputs.acr_name }}"
+
+      - name: Pull image locally and run seed script inside container (creates admin)
+        run: |
+          IMAGE="${{ needs.terraform.outputs.acr_login_server }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7}"
+          # If your medusa image tag differs, IMAGE env is available from prior step too.
+          # Pull the image and run seed command present in package.json (seed uses medusa exec ./src/scripts/seed.ts)
+          docker pull "$IMAGE" || true
+          echo "Running seed inside container to create admin (if seed script exists)..."
+          docker run --rm \
+            -e DATABASE_HOST="${{ needs.terraform.outputs.db_host }}" \
+            -e DATABASE_PORT="${{ needs.terraform.outputs.db_port }}" \
+            -e DATABASE_USERNAME="${{ needs.terraform.outputs.db_user }}" \
+            -e DATABASE_PASSWORD="${{ needs.terraform.outputs.db_password }}" \
+            -e DATABASE_NAME="${{ needs.terraform.outputs.db_name }}" \
+            -e NODE_ENV=production \
+            "$IMAGE" /bin/sh -c "if [ -f package.json ] && grep -q 'seed' package.json; then npm run seed || true; else echo 'no seed script'; fi"
+
+      - name: Configure App Service container + app settings
+        run: |
+          RG="${{ needs.terraform.outputs.resource_group_name }}"
+          APP="${{ needs.terraform.outputs.app_service_name }}"
+          IMAGE="${{ needs.terraform.outputs.acr_login_server }}/${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}"
+          # If we pushed IMAGE earlier, it's in IMAGE env; fallback above constructs it
+          az webapp config container set \
+            --name "$APP" \
+            --resource-group "$RG" \
+            --docker-custom-image-name "$IMAGE" \
+            --docker-registry-server-url "https://${{ needs.terraform.outputs.acr_login_server }}" \
+            --docker-registry-server-user "$(az acr credential show --name "${{ needs.terraform.outputs.acr_name }}" --query username -o tsv)" \
+            --docker-registry-server-password "$(az acr credential show --name "${{ needs.terraform.outputs.acr_name }}" --query passwords[0].value -o tsv)"
+
+          az webapp config appsettings set --name "$APP" --resource-group "$RG" --settings \
+            WEBSITES_ENABLE_APP_SERVICE_STORAGE=false \
+            NODE_ENV=production \
+            MEDUSA_ADMIN_EMAIL="${{ needs.terraform.outputs.db_user }}" \
+            MEDUSA_ADMIN_PASSWORD="${{ needs.terraform.outputs.db_password }}" \
+            DATABASE_HOST="${{ needs.terraform.outputs.db_host }}" \
+            DATABASE_PORT="${{ needs.terraform.outputs.db_port }}" \
+            DATABASE_NAME="${{ needs.terraform.outputs.db_name }}" \
+            DATABASE_USERNAME="${{ needs.terraform.outputs.db_user }}" \
+            DATABASE_PASSWORD="${{ needs.terraform.outputs.db_password }}" \
+            PUBLIC_APP_URL="https://${{ needs.terraform.outputs.backend_url }}" \
+            APP_KEYS="${{ secrets.APP_KEYS }}" \
+            ADMIN_JWT_SECRET="${{ secrets.ADMIN_JWT_SECRET }}" \
+            API_TOKEN_SALT="${{ secrets.API_TOKEN_SALT }}"
+
+      - name: Restart App Service
+        run: |
+          az webapp restart --name "${{ needs.terraform.outputs.app_service_name }}" --resource-group "${{ needs.terraform.outputs.resource_group_name }}"
+
+      - name: Wait for Medusa backend to be available
+        run: |
+          HOST="${{ needs.terraform.outputs.backend_url }}"
+          echo "Waiting for https://${HOST}/health to return 200..."
+          sleep 10
+          for i in $(seq 1 30); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://${HOST}/health" || true)
+            echo "Attempt $i: $CODE"
+            if [ "$CODE" = "200" ]; then
+              echo "Backend healthy"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Backend did not become healthy in time"
+          exit 1
