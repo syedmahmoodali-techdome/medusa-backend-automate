@@ -1,34 +1,36 @@
-resource "random_password" "pg_password" {
-  length  = 20
-  special = true
-  override_special = "!@"
-  keepers = {
-    # ensure regeneration only if input password empty
-    provided = var.db_password != "" ? "provided" : ""
-  }
-}
-
-locals {
-  final_db_password = var.db_password != "" ? var.db_password : random_password.pg_password.result
-}
-
 resource "azurerm_postgresql_flexible_server" "pg" {
-  name                   = "${var.clinic_name}-pg-${var.environment}"
-  resource_group_name    = var.resource_group
-  location               = var.location
-  administrator_login    = var.db_username
-  administrator_password = local.final_db_password
-  sku_name               = "Standard_B1ms"
-  version                = "14"
-  storage_mb             = 32768
-  backup_retention_days  = 7
-  tags                   = var.tags
+  name                = "${var.clinic_name}-pg"
+  location            = var.location
+  resource_group_name = var.resource_group
+
+  version                       = "16"
+  administrator_login           = var.db_username
+  administrator_password        = var.db_password
+  storage_mb                    = 32768
+  zone                          = "1"
+  backup_retention_days         = 7
+  geo_redundant_backup_enabled  = false
+
+  sku_name = "B_Standard_B1ms" # FIXED — VALID FLEXIBLE SERVER SKU
+
+  tags = var.tags
 }
 
-output "fqdn" {
+resource "azurerm_postgresql_flexible_server_database" "pgdb" {
+  name      = var.db_name
+  server_id = azurerm_postgresql_flexible_server.pg.id
+  collation = "en_US.utf8"
+  charset   = "utf8"
+}
+
+output "db_fqdn" {
   value = azurerm_postgresql_flexible_server.pg.fqdn
 }
 
+output "db_username" {
+  value = azurerm_postgresql_flexible_server.pg.administrator_login
+}
+
 output "db_password" {
-  value = local.final_db_password
+  value = var.db_password
 }
