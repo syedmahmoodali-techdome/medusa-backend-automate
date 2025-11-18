@@ -70,6 +70,14 @@ jobs:
           echo "ACR_NAME=$(jq -r .acr_name medusa-deploy-config.json)" >> $GITHUB_ENV
           echo "RESOURCE_GROUP=$(jq -r .resource_group medusa-deploy-config.json)" >> $GITHUB_ENV
 
+
+      # Install Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.9.5
+
+
       ###########################################################################
       # 6) AZURE LOGIN
       ###########################################################################
