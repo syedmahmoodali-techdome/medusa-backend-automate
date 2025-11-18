@@ -4,7 +4,6 @@ resource "azurerm_container_registry" "acr" {
   resource_group_name = var.resource_group
   sku                 = "Basic"
   admin_enabled       = true
-  tags                = var.tags
 }
 
 output "name" { value = azurerm_container_registry.acr.name }
