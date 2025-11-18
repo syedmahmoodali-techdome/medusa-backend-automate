@@ -22,3 +22,11 @@ variable "tags" {
   type = map(string)
   default = {}
 }
+
+variable "branding_region" {
+  type = string
+}
+variable "github_repo" {
+  type = string
+}
+
