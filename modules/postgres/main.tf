@@ -12,8 +12,6 @@ resource "azurerm_postgresql_flexible_server" "pg" {
   geo_redundant_backup_enabled  = false
 
   sku_name = "B_Standard_B1ms"
-
-  tags = var.tags
 }
 
 resource "azurerm_postgresql_flexible_server_database" "pgdb" {
