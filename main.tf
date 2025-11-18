@@ -65,4 +65,5 @@ module "app" {
   db_password = var.db_password
 
   branding_store_name = var.branding_store_name
+  db_name    = var.db_name 
 }
