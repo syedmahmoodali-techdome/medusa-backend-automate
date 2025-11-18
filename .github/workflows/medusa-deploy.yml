@@ -41,7 +41,7 @@ jobs:
       - name: Ensure medusa-deploy-config.json exists
         run: |
           if [ ! -f medusa-deploy-config.json ]; then
-            echo "medusa-deploy-config.json missing in pipeline repo root. Exiting."
+            echo "medusa-deploy-config.json missing in repo root"
             exit 1
           fi
           echo "Found medusa-deploy-config.json:"
@@ -66,7 +66,6 @@ jobs:
           EXPOSE 9000
           CMD ["yarn", "start"]
           EOF
-          echo "Dockerfile created in runner at ${SRC}/Dockerfile"
 
       - name: Parse medusa-deploy-config.json into env
         run: |
@@ -75,7 +74,6 @@ jobs:
           echo "ACR_NAME=$(jq -r '.acr_name' medusa-deploy-config.json)" >> $GITHUB_ENV
           echo "RESOURCE_GROUP=$(jq -r '.resource_group' medusa-deploy-config.json)" >> $GITHUB_ENV
           echo "APP_SERVICE_NAME=$(jq -r '.app_service_name' medusa-deploy-config.json)" >> $GITHUB_ENV
-          # expose other useful values
           echo "ADMIN_EMAIL=$(jq -r '.admin_email' medusa-deploy-config.json)" >> $GITHUB_ENV
           echo "ADMIN_PASSWORD=$(jq -r '.admin_password' medusa-deploy-config.json)" >> $GITHUB_ENV
 
@@ -92,7 +90,7 @@ jobs:
       - name: Copy medusa-deploy-config.json -> terraform.tfvars.json
         run: |
           cp medusa-deploy-config.json terraform.tfvars.json
-          echo "Copied medusa-deploy-config.json -> terraform.tfvars.json"
+          echo "Copied medusa-deploy-config.json → terraform.tfvars.json"
 
       - name: Terraform init & apply (create ACR)
         run: |
@@ -108,14 +106,17 @@ jobs:
           SRC="ecomm-terraform/my-medusa-store"
           LOGIN_SERVER=$(az acr show -n "${ACR_NAME}" --query loginServer -o tsv)
           IMAGE="${LOGIN_SERVER}/${IMAGE_REPO}:${IMAGE_TAG}"
-          echo "Building ${IMAGE} from ${SRC}"
+
+          echo "Building Docker image: ${IMAGE}"
           docker build -t "${IMAGE}" "${SRC}" --file "${SRC}/Dockerfile"
+
           az acr login --name "${ACR_NAME}"
           docker push "${IMAGE}"
+
           echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
           echo "LOGIN_SERVER=${LOGIN_SERVER}" >> $GITHUB_ENV
 
-      - name: Terraform apply (final)
+      - name: Terraform apply (final infra)
         env:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -133,14 +134,11 @@ jobs:
           echo "app_service_name=$(terraform output -raw app_service_name)" >> $GITHUB_OUTPUT
           echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
           echo "db_host=$(terraform output -raw db_host)" >> $GITHUB_OUTPUT
-          if terraform output -json db_port >/dev/null 2>&1; then
-            echo "db_port=$(terraform output -raw db_port)" >> $GITHUB_OUTPUT
-          else
-            echo "db_port=5432" >> $GITHUB_OUTPUT
-          fi
+          echo "db_port=$(terraform output -raw db_port)" >> $GITHUB_OUTPUT
           echo "db_name=$(terraform output -raw db_name)" >> $GITHUB_OUTPUT
           echo "db_user=$(terraform output -raw db_user)" >> $GITHUB_OUTPUT
           echo "db_password=$(terraform output -raw db_password)" >> $GITHUB_OUTPUT
+
           if terraform output -json backend_url >/dev/null 2>&1; then
             echo "backend_url=$(terraform output -raw backend_url)" >> $GITHUB_OUTPUT
           else
@@ -152,16 +150,10 @@ jobs:
     needs: terraform
     runs-on: ubuntu-latest
     environment: production
+
     steps:
       - name: Checkout pipeline repo
         uses: actions/checkout@v4
-
-      - name: Checkout Medusa source repo (to run seeds locally)
-        uses: actions/checkout@v4
-        with:
-          repository: smarter-EMR/ecomm-terraform
-          path: ecomm-terraform
-          token: ${{ secrets.GH_PAT }}
 
       - name: Azure Login
         uses: azure/login@v2
@@ -172,28 +164,12 @@ jobs:
         run: |
           az acr login --name "${{ needs.terraform.outputs.acr_name }}"
 
-      - name: Pull image locally and run seed script inside container (creates admin)
-        run: |
-          IMAGE="${{ needs.terraform.outputs.acr_login_server }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7}"
-          # If your medusa image tag differs, IMAGE env is available from prior step too.
-          # Pull the image and run seed command present in package.json (seed uses medusa exec ./src/scripts/seed.ts)
-          docker pull "$IMAGE" || true
-          echo "Running seed inside container to create admin (if seed script exists)..."
-          docker run --rm \
-            -e DATABASE_HOST="${{ needs.terraform.outputs.db_host }}" \
-            -e DATABASE_PORT="${{ needs.terraform.outputs.db_port }}" \
-            -e DATABASE_USERNAME="${{ needs.terraform.outputs.db_user }}" \
-            -e DATABASE_PASSWORD="${{ needs.terraform.outputs.db_password }}" \
-            -e DATABASE_NAME="${{ needs.terraform.outputs.db_name }}" \
-            -e NODE_ENV=production \
-            "$IMAGE" /bin/sh -c "if [ -f package.json ] && grep -q 'seed' package.json; then npm run seed || true; else echo 'no seed script'; fi"
-
       - name: Configure App Service container + app settings
         run: |
           RG="${{ needs.terraform.outputs.resource_group_name }}"
           APP="${{ needs.terraform.outputs.app_service_name }}"
           IMAGE="${{ needs.terraform.outputs.acr_login_server }}/${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}"
-          # If we pushed IMAGE earlier, it's in IMAGE env; fallback above constructs it
+
           az webapp config container set \
             --name "$APP" \
             --resource-group "$RG" \
@@ -205,8 +181,8 @@ jobs:
           az webapp config appsettings set --name "$APP" --resource-group "$RG" --settings \
             WEBSITES_ENABLE_APP_SERVICE_STORAGE=false \
             NODE_ENV=production \
-            MEDUSA_ADMIN_EMAIL="${{ needs.terraform.outputs.db_user }}" \
-            MEDUSA_ADMIN_PASSWORD="${{ needs.terraform.outputs.db_password }}" \
+            MEDUSA_ADMIN_EMAIL="${{ env.ADMIN_EMAIL }}" \
+            MEDUSA_ADMIN_PASSWORD="${{ env.ADMIN_PASSWORD }}" \
             DATABASE_HOST="${{ needs.terraform.outputs.db_host }}" \
             DATABASE_PORT="${{ needs.terraform.outputs.db_port }}" \
             DATABASE_NAME="${{ needs.terraform.outputs.db_name }}" \
@@ -219,15 +195,17 @@ jobs:
 
       - name: Restart App Service
         run: |
-          az webapp restart --name "${{ needs.terraform.outputs.app_service_name }}" --resource-group "${{ needs.terraform.outputs.resource_group_name }}"
+          az webapp restart \
+           --name "${{ needs.terraform.outputs.app_service_name }}" \
+           --resource-group "${{ needs.terraform.outputs.resource_group_name }}"
 
-      - name: Wait for Medusa backend to be available
+      - name: Wait for Medusa backend health check
         run: |
           HOST="${{ needs.terraform.outputs.backend_url }}"
-          echo "Waiting for https://${HOST}/health to return 200..."
+          echo "Waiting for https://${HOST}/health ..."
           sleep 10
           for i in $(seq 1 30); do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://${HOST}/health" || true)
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" https://${HOST}/health || true)
             echo "Attempt $i: $CODE"
             if [ "$CODE" = "200" ]; then
               echo "Backend healthy"
@@ -235,5 +213,5 @@ jobs:
             fi
             sleep 10
           done
-          echo "Backend did not become healthy in time"
+          echo "Backend did not become healthy"
           exit 1
