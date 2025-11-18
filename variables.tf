@@ -9,26 +9,17 @@ variable "acr_name" { type = string }
 variable "image_repo_name" { type = string }
 variable "image_tag" { type = string }
 
+variable "github_repo" { type = string }
+variable "github_branch" { type = string }
+
 variable "admin_email" { type = string }
 variable "admin_password" { type = string }
 
+variable "db_name" { type = string }
 variable "db_username" { type = string }
-# db_password may be empty in medusa json -> generate in terraform if empty
 variable "db_password" { type = string }
-variable "github_branch" { type = string }
-variable "db_engine" { type = string }
 
-variable "branding_store_name" { type = string }    
+variable "branding_store_name" { type = string }
+variable "branding_region" { type = string }
 
-variable "tags" {
-  type = map(string)
-  default = {}
-}
-
-variable "branding_region" {
-  type = string
-}
-variable "github_repo" {
-  type = string
-}
-
+variable "tags" { type = map(string) default = {} }
