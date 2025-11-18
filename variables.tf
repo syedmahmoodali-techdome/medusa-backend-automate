@@ -21,5 +21,3 @@ variable "db_password" { type = string }
 
 variable "branding_store_name" { type = string }
 variable "branding_region" { type = string }
-
-variable "tags" { type = map(string) default = {} }
