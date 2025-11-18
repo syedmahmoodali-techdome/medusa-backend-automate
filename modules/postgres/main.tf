@@ -11,7 +11,7 @@ resource "azurerm_postgresql_flexible_server" "pg" {
   backup_retention_days         = 7
   geo_redundant_backup_enabled  = false
 
-  sku_name = "B_Standard_B1ms" # FIXED — VALID FLEXIBLE SERVER SKU
+  sku_name = "B_Standard_B1ms"
 
   tags = var.tags
 }
@@ -27,10 +27,10 @@ output "db_fqdn" {
   value = azurerm_postgresql_flexible_server.pg.fqdn
 }
 
-output "db_username" {
-  value = azurerm_postgresql_flexible_server.pg.administrator_login
+output "db_name" {
+  value = azurerm_postgresql_flexible_server_database.pgdb.name
 }
 
-output "db_password" {
-  value = var.db_password
+output "db_username" {
+  value = azurerm_postgresql_flexible_server.pg.administrator_login
 }
