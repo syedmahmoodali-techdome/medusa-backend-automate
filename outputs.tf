@@ -1,27 +1,23 @@
-variable "branding_store_name" {
-  type = string
+output "backend_url" {
+  value = "https://${module.app.default_site_hostname}"
 }
 
-variable "acr_name" {
-  type = string
+output "admin_email" {
+  value = var.admin_email
 }
 
-variable "image_repo_name" {
-  type = string
+output "admin_password" {
+  value = var.admin_password
 }
 
-variable "image_tag" {
-  type = string
+output "resource_group" {
+  value = module.rg.name
 }
 
-variable "admin_email" {
-  type = string
+output "environment" {
+  value = var.environment
 }
 
-variable "admin_password" {
-  type = string
-}
-
-variable "environment" {
-  type = string
+output "acr_login_server" {
+  value = module.acr.login_server
 }
