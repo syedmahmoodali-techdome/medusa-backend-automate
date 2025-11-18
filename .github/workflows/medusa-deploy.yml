@@ -6,7 +6,7 @@ on:
       - main
 
 env:
-  TF_WORKING_DIR: ecomm-terraform/my-medusa-store/medusa-backend-automate
+  TF_WORKING_DIR: ecomm-terraform/my-medusa-store/terraform
 
 jobs:
   deploy:
