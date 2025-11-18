@@ -20,7 +20,6 @@ module "rg" {
   source = "./modules/resource_group"
   location = var.location
   resource_group_name = var.resource_group
-  tags = var.tags
 }
 
 # ACR
@@ -29,7 +28,6 @@ module "acr" {
   resource_group = module.rg.name
   location = var.location
   acr_name = var.acr_name
-  tags = var.tags
 }
 
 # Postgres
@@ -41,7 +39,6 @@ module "postgres" {
   db_name = var.db_name
   db_username = var.db_username
   db_password = var.db_password
-  tags = var.tags
 }
 
 # App Service & wiring
@@ -68,6 +65,4 @@ module "app" {
   db_password = var.db_password
 
   branding_store_name = var.branding_store_name
-
-  tags = var.tags
 }
