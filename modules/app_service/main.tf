@@ -4,7 +4,6 @@ resource "azurerm_service_plan" "plan" {
   resource_group_name = var.resource_group
   os_type             = "Linux"
   sku_name            = "P1v2"
-  tags                = var.tags
 }
 
 resource "azurerm_linux_web_app" "app" {
@@ -40,8 +39,6 @@ resource "azurerm_linux_web_app" "app" {
   identity {
     type = "SystemAssigned"
   }
-
-  tags = var.tags
 }
 
 output "app_service_name" {
