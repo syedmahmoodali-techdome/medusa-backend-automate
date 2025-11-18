@@ -1,23 +1,25 @@
 {
-  "clinic_name": "jaytechdome",
+  "clinic_name": "alitechdome",
   "environment": "production",
   "location": "eastus",
-  "resource_group": "rg-jaytechdome-prod",
-  "app_service_name": "jaytechdome-medusa-prod",
-  "acr_name": "jaytechdomeacr001",
-  "image_repo_name": "jaytechdome/medusa",
+  "resource_group": "rg-alitechdome-prod",
+
+  "app_service_name": "alitechdome-medusa-prod",
+
+  "acr_name": "alitechdomeacr001",
+  "image_repo_name": "medusa", 
   "image_tag": "v1.0.0",
+
   "github_repo": "smarter-EMR/ecomm-terraform",
   "github_branch": "main",
-  "admin_email": "admin@jaytechdome.com",
+
+  "admin_email": "admin@alitechdome.com",
   "admin_password": "ChangeMe@123!",
-  "db": {
-    "engine": "postgres",
-    "username": "medusa_admin",
-    "password": ""
-  },
-  "branding": {
-    "store_name": "JayTech Medusa Store",
-    "region": "IN"
-  }
+
+  "db_engine": "postgres",
+  "db_username": "medusa_admin",
+  "db_password": "YourStrongPasswordHere!",
+
+  "branding_store_name": "Ali Medusa Store",
+  "branding_region": "IN"
 }
