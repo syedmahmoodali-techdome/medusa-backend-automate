@@ -6,8 +6,6 @@ variable "app_service_name" { type = string }
 variable "acr_login_server" { type = string }
 variable "acr_admin_username" { type = string }
 variable "acr_admin_password" { type = string }
-# also needed by data source if necessary
-variable "acr_name_from_login" { type = string }
 
 variable "image_repo_name" { type = string }
 variable "image_tag" { type = string }
