@@ -14,27 +14,14 @@ variable "image_tag" {
   type = string
 }
 
-output "backend_url" {
-  value = "https://${module.app.default_site_hostname}"
+variable "admin_email" {
+  type = string
 }
 
-output "admin_email" {
-  value = var.admin_email
+variable "admin_password" {
+  type = string
 }
 
-output "admin_password" {
-  value = var.admin_password
-}
-
-output "resource_group" {
-  value = module.rg.name
-}
-
-output "environment" {
-  value = var.environment
-}
-
-# dump useful values as well
-output "acr_login_server" {
-  value = module.acr.login_server
+variable "environment" {
+  type = string
 }
