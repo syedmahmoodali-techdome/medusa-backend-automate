@@ -16,8 +16,4 @@
   "db_password": "SecurePasswordHere!",
   "branding_store_name": "Ali Medusa Store",
   "branding_region": "IN",
-  "tags": {
-    "owner": "wizlo",
-    "project": "medusa"
-  }
 }
