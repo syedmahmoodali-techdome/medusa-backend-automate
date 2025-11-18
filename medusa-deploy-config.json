@@ -1,0 +1,23 @@
+{
+  "clinic_name": "jaytechdome",
+  "environment": "production",
+  "location": "eastus",
+  "resource_group": "rg-jaytechdome-prod",
+  "app_service_name": "jaytechdome-medusa-prod",
+  "acr_name": "jaytechdomeacr001",
+  "image_repo_name": "jaytechdome/medusa",
+  "image_tag": "v1.0.0",
+  "github_repo": "smarter-EMR/ecomm-terraform",
+  "github_branch": "main",
+  "admin_email": "admin@jaytechdome.com",
+  "admin_password": "ChangeMe@123!",
+  "db": {
+    "engine": "postgres",
+    "username": "medusa_admin",
+    "password": ""
+  },
+  "branding": {
+    "store_name": "JayTech Medusa Store",
+    "region": "IN"
+  }
+}

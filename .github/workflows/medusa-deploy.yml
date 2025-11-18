@@ -1,0 +1,164 @@
+name: Medusa Backend Deploy (clone source repo, build in-run, deploy via Terraform)
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  TF_WORKING_DIR: terraform
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # 1) Checkout the pipeline repo (where this workflow lives)
+      - name: Checkout pipeline repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2) Checkout the Medusa source repo into ecomm-terraform/
+      #    Uses your classic PAT stored in secrets.GITHUB_CLASSIC_TOKEN
+      - name: Checkout Medusa source repository (smarter-EMR/ecomm-terraform)
+        uses: actions/checkout@v4
+        with:
+          repository: smarter-EMR/ecomm-terraform
+          token: ${{ secrets.GH_PAT }}
+          path: ecomm-terraform
+          fetch-depth: 0
+          # optional: ref: main
+
+      # 3) Validate medusa JSON exists in pipeline repo (root)
+      - name: Validate medusa-deploy-config.json exists
+        run: |
+          if [ ! -f medusa-deploy-config.json ]; then
+            echo "medusa-deploy-config.json not found in pipeline repo root. Exiting."
+            exit 1
+          fi
+          echo "medusa-deploy-config.json:"
+          cat medusa-deploy-config.json
+
+      # 4) Create Dockerfile inside the runner, inside the source tree (no commits)
+      - name: Create Dockerfile in source path (runner only)
+        run: |
+          SRC_PATH="ecomm-terraform/my-medusa-store"
+          mkdir -p "$SRC_PATH"
+          cat > "${SRC_PATH}/Dockerfile" <<'EOF'
+          # Auto-generated Dockerfile for Medusa backend (created by pipeline)
+          FROM node:20-alpine AS builder
+          WORKDIR /app
+          # copy package files for install
+          COPY package.json yarn.lock* package-lock.json* ./
+          RUN npm ci --production=false
+          # copy source and build
+          COPY . .
+          RUN npm run build || true
+          FROM node:20-alpine AS runtime
+          WORKDIR /app
+          ENV NODE_ENV=production
+          COPY --from=builder /app ./
+          EXPOSE 9000
+          CMD ["yarn", "start"]
+          EOF
+          echo "Dockerfile written to ${SRC_PATH}/Dockerfile (runner only)"
+
+      # 5) Parse medusa JSON values into env
+      - name: Parse medusa config into env
+        id: parse
+        run: |
+          echo "Reading medusa-deploy-config.json"
+          IMAGE_REPO=$(jq -r '.image_repo_name' medusa-deploy-config.json)
+          IMAGE_TAG=$(jq -r '.image_tag' medusa-deploy-config.json)
+          ACR_NAME=$(jq -r '.acr_name' medusa-deploy-config.json)
+          RG=$(jq -r '.resource_group' medusa-deploy-config.json)
+          echo "IMAGE_REPO=$IMAGE_REPO" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
+          echo "RG=$RG" >> $GITHUB_ENV
+
+      # 6) Login to Azure with service principal
+      - name: Azure Login (service principal)
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # 7) Terraform init & apply - target ACR module first so registry exists
+      - name: Terraform init & apply (create ACR)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform init -input=false
+          terraform apply -auto-approve -target=module.acr
+
+      # 8) Build and push Docker image using the checked-out source tree
+      - name: Build and push Docker image to ACR
+        env:
+          IMAGE_REPO: ${{ env.IMAGE_REPO }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          ACR_NAME: ${{ env.ACR_NAME }}
+        run: |
+          set -e
+          SRC_PATH="ecomm-terraform/my-medusa-store"
+          echo "Ensure source path exists: $SRC_PATH"
+          if [ ! -d "$SRC_PATH" ]; then
+            echo "Source path $SRC_PATH not found!"
+            ls -la
+            exit 1
+          fi
+
+          # Get login server
+          LOGIN_SERVER=$(az acr show -n "${ACR_NAME}" --query loginServer -o tsv)
+          echo "ACR login server: ${LOGIN_SERVER}"
+          IMAGE="${LOGIN_SERVER}/${IMAGE_REPO}:${IMAGE_TAG}"
+          echo "Building image ${IMAGE} from ${SRC_PATH}"
+          docker build -t "${IMAGE}" "${SRC_PATH}" --file "${SRC_PATH}/Dockerfile"
+          az acr login --name "${ACR_NAME}"
+          docker push "${IMAGE}"
+          echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
+          echo "LOGIN_SERVER=${LOGIN_SERVER}" >> $GITHUB_ENV
+
+      # 9) Copy medusa-deploy-config.json into Terraform folder as terraform.tfvars.json
+      - name: Prepare terraform.tfvars.json
+        run: |
+          cp medusa-deploy-config.json ${TF_WORKING_DIR}/terraform.tfvars.json
+          echo "Copied medusa-deploy-config.json -> ${TF_WORKING_DIR}/terraform.tfvars.json"
+
+      # 10) Terraform apply final (create DB, App Service, wiring)
+      - name: Terraform apply (final)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        env:
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          terraform init -input=false
+          terraform apply -auto-approve -var-file="terraform.tfvars.json"
+
+      # 11) Terraform outputs (JSON)
+      - name: Terraform outputs (json)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform output -json > tf_outputs.json
+          cat tf_outputs.json
+
+      # 12) Optional: send outputs back to Wizlo
+      # - name: POST outputs to Wizlo (optional)
+      #   if: ${{ secrets.WIZLO_API_URL && secrets.WIZLO_API_KEY }}
+      #   env:
+      #     WIZLO_API_URL: ${{ secrets.WIZLO_API_URL }}
+      #     WIZLO_API_KEY: ${{ secrets.WIZLO_API_KEY }}
+      #   run: |
+      #     curl -X POST "${WIZLO_API_URL}" \
+      #       -H "Authorization: Bearer ${WIZLO_API_KEY}" \
+      #       -H "Content-Type: application/json" \
+      #       --data-binary @tf_outputs.json || true
+
+      # 13) Delete ACR (as requested) - WARNING: image removed, app may fail on restart
+      - name: Delete ACR (per request) - WARNING
+        if: always()
+        env:
+          ACR_NAME: ${{ env.ACR_NAME }}
+        run: |
+          echo "Deleting ACR ${ACR_NAME} (this will remove pushed images)."
+          az acr delete -n "${ACR_NAME}" --yes || true
