@@ -1,50 +1,48 @@
-name: Medusa Backend Deploy (clone source repo, build, deploy via Terraform)
+name: Medusa Backend Deploy (clone source repo, build in-run, deploy via Terraform)
 
 on:
   push:
     branches:
       - main
 
+env:
+  TF_WORKING_DIR: terraform
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      ###########################################################################
-      # 1) CHECKOUT THIS PIPELINE REPO
-      ###########################################################################
+      # 1) Checkout pipeline repo
       - name: Checkout pipeline repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      ###########################################################################
-      # 2) CLONE SOURCE MEDUSA BACKEND REPO (runner only)
-      ###########################################################################
-      - name: Clone Medusa backend source repo
+      # 2) Checkout Medusa source repo
+      - name: Checkout Medusa source repository (smarter-EMR/ecomm-terraform)
         uses: actions/checkout@v4
         with:
           repository: smarter-EMR/ecomm-terraform
-          path: ecomm-terraform
           token: ${{ secrets.GH_PAT }}
+          path: ecomm-terraform
+          fetch-depth: 0
 
-      ###########################################################################
-      # 3) ENSURE config JSON exists
-      ###########################################################################
-      - name: Validate medusa-deploy-config.json
+      # 3) Validate JSON exists
+      - name: Validate medusa-deploy-config.json exists
         run: |
           if [ ! -f medusa-deploy-config.json ]; then
-            echo "❌ medusa-deploy-config.json missing!"
+            echo "medusa-deploy-config.json missing."
             exit 1
           fi
-          echo "medusa-deploy-config.json found:"
           cat medusa-deploy-config.json
 
-      ###########################################################################
-      # 4) CREATE DOCKERFILE inside source repo (runner only)
-      ###########################################################################
-      - name: Create Dockerfile in Medusa source
+      # 4) Create Dockerfile (runner only)
+      - name: Create Dockerfile in source path
         run: |
-          SRC=ecomm-terraform/my-medusa-store
-          cat > $SRC/Dockerfile <<'EOF'
+          SRC_PATH="ecomm-terraform/my-medusa-store"
+          mkdir -p "$SRC_PATH"
+          cat > "${SRC_PATH}/Dockerfile" <<'EOF'
           FROM node:20-alpine AS builder
           WORKDIR /app
           COPY package.json yarn.lock* package-lock.json* ./
@@ -52,7 +50,7 @@ jobs:
           COPY . .
           RUN npm run build || true
 
-          FROM node:20-alpine
+          FROM node:20-alpine AS runtime
           WORKDIR /app
           ENV NODE_ENV=production
           COPY --from=builder /app .
@@ -60,86 +58,78 @@ jobs:
           CMD ["yarn", "start"]
           EOF
 
-      ###########################################################################
-      # 5) Parse JSON -> ENV vars
-      ###########################################################################
-      - name: Parse JSON into ENV vars
+      # 5) Parse medusa JSON
+      - name: Parse medusa config
         run: |
-          echo "IMAGE_REPO=$(jq -r .image_repo_name medusa-deploy-config.json)" >> $GITHUB_ENV
-          echo "IMAGE_TAG=$(jq -r .image_tag medusa-deploy-config.json)" >> $GITHUB_ENV
-          echo "ACR_NAME=$(jq -r .acr_name medusa-deploy-config.json)" >> $GITHUB_ENV
-          echo "RESOURCE_GROUP=$(jq -r .resource_group medusa-deploy-config.json)" >> $GITHUB_ENV
+          echo "IMAGE_REPO=$(jq -r '.image_repo_name' medusa-deploy-config.json)" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$(jq -r '.image_tag' medusa-deploy-config.json)" >> $GITHUB_ENV
+          echo "ACR_NAME=$(jq -r '.acr_name' medusa-deploy-config.json)" >> $GITHUB_ENV
+          echo "RG=$(jq -r '.resource_group' medusa-deploy-config.json)" >> $GITHUB_ENV
 
-
-      # Install Terraform
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: 1.9.5
-
-
-      ###########################################################################
-      # 6) AZURE LOGIN
-      ###########################################################################
+      # 6) Login to Azure
       - name: Azure Login
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      ###########################################################################
-      # 7) TERRAFORM INIT + ACR CREATION ONLY
-      ###########################################################################
-      - name: Terraform Init + Apply (ACR only)
+      # 7) Install Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.9.5
+
+      # 8) Terraform init & apply ACR first
+      - name: Terraform init & apply (ACR)
+        working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           terraform init -input=false
           terraform apply -auto-approve -target=module.acr
 
-      ###########################################################################
-      # 8) BUILD & PUSH IMAGE TO ACR
-      ###########################################################################
-      - name: Build & Push Medusa Docker image
+      # 9) Build & push Docker image
+      - name: Build and push Docker image
         run: |
-          SRC=ecomm-terraform/my-medusa-store
+          SRC_PATH="ecomm-terraform/my-medusa-store"
+          if [ ! -d "$SRC_PATH" ]; then
+            echo "Source path missing"
+            exit 1
+          fi
 
-          LOGIN_SERVER=$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)
-          echo "ACR login server: $LOGIN_SERVER"
+          LOGIN_SERVER=$(az acr show -n "${ACR_NAME}" --query loginServer -o tsv)
+          IMAGE="${LOGIN_SERVER}/${IMAGE_REPO}:${IMAGE_TAG}"
 
-          IMAGE="$LOGIN_SERVER/$IMAGE_REPO:$IMAGE_TAG"
+          docker build -t "${IMAGE}" "${SRC_PATH}"
+          az acr login --name "${ACR_NAME}"
+          docker push "${IMAGE}"
 
-          docker build -t "$IMAGE" "$SRC" --file "$SRC/Dockerfile"
-          az acr login --name "$ACR_NAME"
-          docker push "$IMAGE"
+          echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
+          echo "LOGIN_SERVER=${LOGIN_SERVER}" >> $GITHUB_ENV
 
-          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
-
-      ###########################################################################
-      # 9) COPY CONFIG JSON AS TERRAFORM VARS
-      ###########################################################################
+      # 10) Move JSON into tfvars.json
       - name: Prepare terraform.tfvars.json
         run: |
-          cp medusa-deploy-config.json terraform.tfvars.json
+          cp medusa-deploy-config.json ${TF_WORKING_DIR}/terraform.tfvars.json
 
-      ###########################################################################
-      # 10) FULL TERRAFORM APPLY (DB+APP_SERVICE)
-      ###########################################################################
-      - name: Terraform Init + Apply Full Infra
+      # 11) Full Terraform apply
+      - name: Terraform apply (final)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        env:
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
           terraform init -input=false
           terraform apply -auto-approve -var-file="terraform.tfvars.json"
 
-      ###########################################################################
-      # 11) EXPORT OUTPUTS
-      ###########################################################################
-      - name: Terraform Outputs
+      # 12) Terraform outputs
+      - name: Terraform outputs
+        working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           terraform output -json > tf_outputs.json
           cat tf_outputs.json
 
-      ###########################################################################
-      # 12) DELETE ACR (as requested)
-      ###########################################################################
+      # 13) Delete ACR after deployment
       - name: Delete ACR
         if: always()
         run: |
-          echo "Deleting ACR: $ACR_NAME"
-          az acr delete -n "$ACR_NAME" --yes || true
+          az acr delete -n "${ACR_NAME}" --yes || true
