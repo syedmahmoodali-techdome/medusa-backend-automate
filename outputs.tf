@@ -1,3 +1,19 @@
+variable "branding_store_name" {
+  type = string
+}
+
+variable "acr_name" {
+  type = string
+}
+
+variable "image_repo_name" {
+  type = string
+}
+
+variable "image_tag" {
+  type = string
+}
+
 output "backend_url" {
   value = "https://${module.app.default_site_hostname}"
 }
