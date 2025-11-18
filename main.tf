@@ -29,14 +29,18 @@ module "acr" {
 
 module "postgres" {
   source = "./modules/postgres"
-  resource_group = module.rg.name
-  location       = var.location
-  db_username    = var.db_username
-  db_password    = var.db_password
+
   clinic_name    = var.clinic_name
-  environment    = var.environment
-  tags           = var.tags
+  location       = var.location
+  resource_group = module.rg.name
+
+  db_name     = "${var.clinic_name}db"
+  db_username = var.db_username
+  db_password = var.db_password
+
+  tags = var.tags
 }
+
 
 module "app" {
   source = "./modules/app_service"
