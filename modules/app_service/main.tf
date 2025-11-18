@@ -4,8 +4,7 @@ resource "azurerm_service_plan" "plan" {
   resource_group_name = var.resource_group
   os_type             = "Linux"
   sku_name            = "P1v2"
-
-  tags = var.tags
+  tags                = var.tags
 }
 
 resource "azurerm_linux_web_app" "app" {
@@ -20,22 +19,19 @@ resource "azurerm_linux_web_app" "app" {
 
   app_settings = {
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
-    "NODE_ENV"                             = var.environment
+    "NODE_ENV" = var.environment
 
-    # Admin credentials
     "MEDUSA_ADMIN_EMAIL"    = var.admin_email
     "MEDUSA_ADMIN_PASSWORD" = var.admin_password
 
-    # Postgres
     "DATABASE_HOST"     = var.db_fqdn
     "DATABASE_PORT"     = "5432"
+    "DATABASE_NAME"     = var.db_name
     "DATABASE_USERNAME" = var.db_username
     "DATABASE_PASSWORD" = var.db_password
 
-    # Branding
     "BRANDING_STORE_NAME" = var.branding_store_name
 
-    # ACR Authentication
     "DOCKER_REGISTRY_SERVER_URL"      = "https://${var.acr_login_server}"
     "DOCKER_REGISTRY_SERVER_USERNAME" = var.acr_admin_username
     "DOCKER_REGISTRY_SERVER_PASSWORD" = var.acr_admin_password
@@ -48,6 +44,10 @@ resource "azurerm_linux_web_app" "app" {
   tags = var.tags
 }
 
-output "default_site_hostname" {
+output "app_service_name" {
+  value = var.app_service_name
+}
+
+output "default_hostname" {
   value = azurerm_linux_web_app.app.default_hostname
 }
