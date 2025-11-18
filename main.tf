@@ -56,7 +56,7 @@ module "app" {
   environment        = var.environment
   admin_email        = var.admin_email
   admin_password     = var.admin_password
-  db_fqdn            = module.postgres.fqdn
+  db_fqdn            = module.postgres.db_fqdn
   db_username        = var.db_username
   db_password        = module.postgres.db_password
   branding_store_name = var.branding_store_name
