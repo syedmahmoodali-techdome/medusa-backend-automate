@@ -15,6 +15,8 @@ variable "admin_password" { type = string }
 variable "db_username" { type = string }
 # db_password may be empty in medusa json -> generate in terraform if empty
 variable "db_password" { type = string }
+variable "github_branch" { type = string }
+variable "db_engine" { type = string }
 
 variable "branding_store_name" { type = string }    
 
