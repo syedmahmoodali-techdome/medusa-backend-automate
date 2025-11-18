@@ -15,9 +15,10 @@ variable "admin_email" { type = string }
 variable "admin_password" { type = string }
 
 variable "db_fqdn" { type = string }
+variable "db_name" { type = string }
 variable "db_username" { type = string }
 variable "db_password" { type = string }
 
 variable "branding_store_name" { type = string }
 
-variable "tags" { type = map(string) }
+variable "tags" { type = map(string) default = {} }
