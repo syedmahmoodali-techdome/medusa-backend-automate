@@ -93,9 +93,15 @@ jobs:
           echo "Copied medusa-deploy-config.json → terraform.tfvars.json"
 
       - name: Terraform init & apply (create ACR)
+        env:
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
           terraform init -input=false
           terraform apply -auto-approve -target=module.acr
+
 
       - name: Build & push Medusa Docker image to ACR
         env:
