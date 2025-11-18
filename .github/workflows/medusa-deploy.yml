@@ -37,7 +37,7 @@ jobs:
           fi
           cat medusa-deploy-config.json
 
-      # 4) Create Dockerfile (runner only)
+      # 4) Create Dockerfile
       - name: Create Dockerfile in source path
         run: |
           SRC_PATH="ecomm-terraform/my-medusa-store"
@@ -46,7 +46,7 @@ jobs:
           FROM node:20-alpine AS builder
           WORKDIR /app
           COPY package.json yarn.lock* package-lock.json* ./
-          RUN npm ci --production=false
+          RUN npm install --force
           COPY . .
           RUN npm run build || true
 
@@ -55,7 +55,7 @@ jobs:
           ENV NODE_ENV=production
           COPY --from=builder /app .
           EXPOSE 9000
-          CMD ["yarn", "start"]
+          CMD ["npm", "start"]
           EOF
 
       # 5) Parse medusa JSON
@@ -78,21 +78,23 @@ jobs:
         with:
           terraform_version: 1.9.5
 
-      # 8) Terraform init & apply ACR first
+      # 8) COPY tfvars BEFORE ANY TERRAFORM APPLY
+      - name: Prepare terraform.tfvars.json
+        run: |
+          cp medusa-deploy-config.json ${TF_WORKING_DIR}/terraform.tfvars.json
+          echo "Copied config into terraform.tfvars.json"
+
+      # 9) Terraform init + ACR module apply
       - name: Terraform init & apply (ACR)
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           terraform init -input=false
           terraform apply -auto-approve -target=module.acr
 
-      # 9) Build & push Docker image
+      # 10) Build & push Docker image
       - name: Build and push Docker image
         run: |
           SRC_PATH="ecomm-terraform/my-medusa-store"
-          if [ ! -d "$SRC_PATH" ]; then
-            echo "Source path missing"
-            exit 1
-          fi
 
           LOGIN_SERVER=$(az acr show -n "${ACR_NAME}" --query loginServer -o tsv)
           IMAGE="${LOGIN_SERVER}/${IMAGE_REPO}:${IMAGE_TAG}"
@@ -104,11 +106,6 @@ jobs:
           echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
           echo "LOGIN_SERVER=${LOGIN_SERVER}" >> $GITHUB_ENV
 
-      # 10) Move JSON into tfvars.json
-      - name: Prepare terraform.tfvars.json
-        run: |
-          cp medusa-deploy-config.json ${TF_WORKING_DIR}/terraform.tfvars.json
-
       # 11) Full Terraform apply
       - name: Terraform apply (final)
         working-directory: ${{ env.TF_WORKING_DIR }}
@@ -119,7 +116,7 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
           terraform init -input=false
-          terraform apply -auto-approve -var-file="terraform.tfvars.json"
+          terraform apply -auto-approve
 
       # 12) Terraform outputs
       - name: Terraform outputs
