@@ -92,6 +92,17 @@ jobs:
           cp medusa-deploy-config.json terraform.tfvars.json
           echo "Copied medusa-deploy-config.json → terraform.tfvars.json"
 
+      - name: Cleanup bad Terraform state (residual failed resources)
+        run: |
+          terraform init -input=false || true
+
+          # Remove broken Postgres resource if exists
+          terraform state rm module.postgres.azurerm_postgresql_flexible_server.pg || true
+
+          # Remove broken App Service Plan if exists
+          terraform state rm module.app.azurerm_service_plan.plan || true
+
+
       - name: Terraform init & apply (create ACR)
         env:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
