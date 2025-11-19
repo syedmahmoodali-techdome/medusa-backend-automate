@@ -1,7 +1,7 @@
 {
   "clinic_name": "alitechdome",
   "environment": "production",
-  "location": "eastus",
+  "location": "centralus",
   "resource_group": "rg-alitechdome-prod",
   "app_service_name": "alitechdome-medusa-prod",
   "acr_name": "alitechdomeacr001",
