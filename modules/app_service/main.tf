@@ -12,13 +12,14 @@ resource "azurerm_linux_web_app" "app" {
   resource_group_name = var.resource_group
   service_plan_id     = azurerm_service_plan.plan.id
 
-  site_config {
-    linux_fx_version = "DOCKER|${var.acr_login_server}/${var.image_repo_name}:${var.image_tag}"
-  }
+  # Do NOT configure container image here.
+  # Terraform can no longer manage linux_fx_version when using the new provider.
+  # The pipeline will configure the container with:
+  #   az webapp config container set --docker-custom-image-name ...
 
   app_settings = {
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
-    "NODE_ENV" = var.environment
+    "NODE_ENV"                            = var.environment
 
     "MEDUSA_ADMIN_EMAIL"    = var.admin_email
     "MEDUSA_ADMIN_PASSWORD" = var.admin_password
@@ -31,9 +32,10 @@ resource "azurerm_linux_web_app" "app" {
 
     "BRANDING_STORE_NAME" = var.branding_store_name
 
-    "DOCKER_REGISTRY_SERVER_URL"      = "https://${var.acr_login_server}"
-    "DOCKER_REGISTRY_SERVER_USERNAME" = var.acr_admin_username
-    "DOCKER_REGISTRY_SERVER_PASSWORD" = var.acr_admin_password
+    # DO NOT SET THESE (Azure prohibits it)
+    # "DOCKER_REGISTRY_SERVER_URL"      = ...
+    # "DOCKER_REGISTRY_SERVER_USERNAME" = ...
+    # "DOCKER_REGISTRY_SERVER_PASSWORD" = ...
   }
 
   identity {
