@@ -100,7 +100,7 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
           terraform init -input=false
-          terraform apply -auto-approve -target=module.acr
+          terraform apply -auto-approve
 
 
       - name: Build & push Medusa Docker image to ACR
